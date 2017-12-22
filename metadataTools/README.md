@@ -1,4 +1,4 @@
-Takes a given structured csv (line XX) file and converts all rows with fully filled values to an xml metadata file following the ISO 19139 geospatial metadata schema.
+Takes a given structured csv (csvfile variable) file and converts all rows with fully filled values to an xml metadata file following the ISO 19139 geospatial metadata schema.
 
 This conversion was written for metadata that will be held in a data repository and follows criteria outlined in the
 

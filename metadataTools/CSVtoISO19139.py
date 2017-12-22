@@ -1,7 +1,7 @@
 # Ben Hickson
 # December 21, 2017
 
-# FUNCTION: Takes a given structured csv (line XX) file and converts all rows with fully filled values to an xml
+# FUNCTION: Takes a given structured csv (variable csvfile) file and converts all rows with fully filled values to an xml
 # metadata file following the ISO 19139 geospatial metadata schema.
 
 # PURPOSE: This conversion was written for metadata that will be held in a data repository and follows criteria outlined in the
@@ -492,7 +492,7 @@ def validateRow(row, num):
             exit()
 
 
-isotemplate = checkpath(vars(parser.parse_args())["xmltemplate"]) if None else "./ISO_Template.xml"
+isotemplate = checkpath(vars(parser.parse_args())["xmltemplate"]) if None else "./XML_Template.xml"
 csvfile = checkpath(vars(parser.parse_args())["csvfile"]) if None else "./metadata.csv"
 datasetdirectory = vars(parser.parse_args())["datadir"]
 
