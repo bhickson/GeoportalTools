@@ -6,8 +6,8 @@
 #  TO A NEW DIRECTORY BASED ON THE HASH. SEE THE setOutDir FUNCTION FOR MORE INFO.
 
 # VARIABLES OF NOTE
-#   IF THE tosolr ARGUMENT IS PASSED THE JSON STRING WILL BE POSTED IN AN UPDATE REQUEST TO THE SOLR URL SPECIFIED IN
-#        THE solrURL variable
+#   IF THE tosolr ARGUMENT IS PASSED THE JSON STRING WILL BE POSTED IN AN UPDATE REQUEST TO THE SOLR COLLECTION URL
+#  SPECIFIED IN THE solr_loc variable
 #   THE LIST OF COLLECTIONS (collections) WHICH THE RECORD BELONGS TO IS DERIVED FROM THE EXISTING DIRECTORY STRUCTURE
 #  WHERE THE XML FILE IS HELD. E.G. IF THE XML FILE IS IN "./imagery/aerial photographs/USDA/NAIP/" THE COLLECTION LIST
 #  IN THE JSON WILL BE [imagery, aerial photographs, USDA, NAIP]
@@ -17,25 +17,34 @@ from lxml import etree as ET
 from collections import OrderedDict
 from xml.dom import minidom as md
 
-solrURL = 'http://geodev2.library.arizona.edu:8086/solr/UALib_test/update?commit=true'
+print("Starting")
+# Apache Solr Collection URL. E.g. http://localhost:8080/solr/collection1
+solr_loc = ""
+solrURL = solr_loc + "/update?commit=true"
+# GeoServer Location
+geoserver_loc = "https://geo.library.arizona.edu/geoserver"
+
 
 parser = argparse.ArgumentParser(description="Takes a given directory containing xml files following the ISO 19139"
                                              " format and converts them to JSON files following the GeoBlacklight"
                                              " schema.")
-parser.add_argument("-o", "--outdir", type=str, help="Output directory for where split hash folders will be created")
-parser.add_argument("-m", "--mddir", type=str, help="Location of the CSV file containing metadata information. If not"
-                                                    " specified, the script directory is used")
+parser.add_argument("-o", "--outdir", type=str, help="Output parent directory where processed files and folders will be"
+                                                     " created. Defaults to the current directory.")
+parser.add_argument("-m", "--mddir", type=str, help="Location of the CSV file containing metadata information. Defaults"
+                                                    " to the current directory.")
 parser.add_argument("-d", "--datadir", type=str, help="Directory location where geospatial datasets reside. If not"
                                                       " specified, the script directory is used.")
-
 parser.add_argument("-r", "--rights", type=str, help="Access rights - should be \"Public\" or \"Restricted\". Default"
                                                      " is Public.")
 parser.add_argument("-i", "--institution", type=str, help="Institution holding the dataset. Default is UArizona")
 parser.add_argument("-v", "--version", type=str, help="Geoblacklight Schema Version. Default is 1.0")
 parser.add_argument("-w", "--workspace", type=str, help="Geoserver workspace where the dataset is held. Used for OGC"
-                                                        " services (wms, wcs, wfs).")
-parser.add_argument("-i", "--mdurl", type=str, help="Prefix for the URL where the full xml metadata record can be"
-                                                    " found.")
+                                                        " services (wms, wcs, wfs). Default is UniversityLibrary")
+parser.add_argument("-u", "--mdurl", type=str, help="Prefix for the URL where the full xml metadata record can be"
+                                                    " found. Default is \"https://raw.githubusercontent.com/OpenGeoMetadata/edu.\" + institution.lower()")
+parser.add_argument("-t", "--tosolr", type=str, help="True/False value indicating if the composed gbl schema should be"
+                                                     " posted to the url identified by the solr_loc variable. Default is"
+                                                     " False.")
 
 
 
@@ -43,12 +52,18 @@ def checkpath(path):
     if not os.path.exists(path):
         print("ERROR: Dataset or directory \"" + path + "\"cannot be found.")
         exit()
+    else:
+        return path
 
 
 def findFile(xmlFile):
     dataName = xmlFile[:-4]  # Remove xml extension, should still have data extension (.tif or .shp)
-    fpath = filelist[dataName]
-    return fpath
+    try:
+        fpath = filelist[dataName]
+        return fpath
+    except:
+        print("ERROR: Unable to find the geospatial dataset", dataName, "in the data directory (datadir). Exiting.")
+        exit()
 
 
 def getDataType(file):
@@ -56,7 +71,7 @@ def getDataType(file):
     if datafile:
         ext = file.split(".")[1]
         if ext == "tif":
-            return (["Raster", "Image"])
+            return ["Raster", "Image"]
         elif ext == "shp":
             driver = ogr.GetDriverByName("ESRI Shapefile")
             file = driver.Open(datafile, 0)
@@ -68,7 +83,7 @@ def getDataType(file):
                 geomFormat = "Line"
             if geomFormat == "Multipolygon":
                 geomFormat = "Polygon"
-            return ([geomFormat, "Dataset"])
+            return [geomFormat, "Dataset"]
     else:
         print("Can't Find File")
 
@@ -158,6 +173,11 @@ def setOutDir(lyr_id, odir):
 
     https: // github.com / OpenGeoMetadata / metadatarepository / issues / 3
     """
+
+    if not os.path.exists(odir):
+        # print(dir)
+        os.mkdir(odir)
+
     # fvn-1a (32 bit) hash calculated pull from https://gist.github.com/vaiorabbit/5670985
     hval = 0x811c9dc5
     fnv_32_prime = 0x01000193
@@ -337,7 +357,7 @@ def createDictionary(dict, file):
     # CONSTANTS
     dict["dc_rights_s"] = rights
     dict["dct_provenance_s"] = institution
-    # dict["geoblacklight_version"] = gbl_schema_version
+    dict["geoblacklight_version"] = gbl_schema_version
     # GeoserverWorkspace:LayerName.  University of Arizona Unique
     fileName_noext = file.split(".")[0]  # Removing path from file path
     dict["layer_id_s"] = layerid_prefix + ":" + fileName_noext
@@ -356,9 +376,11 @@ def createDictionary(dict, file):
     dict["dct_references_s"] = OrderedDict()
 
     dict["dct_references_s"][
-        "http://www.opengis.net/def/serviceType/ogc/wms"] = "https://geo.library.arizona.edu/geoserver/wms"
-    dict["dct_references_s"][
-        "http://www.opengis.net/def/serviceType/ogc/wfs"] = "https://geo.library.arizona.edu/geoserver/wfs"
+        "http://www.opengis.net/def/serviceType/ogc/wms"] = geoserver_loc + "/wms"
+    if getDataType(file)[1] == "Dataset":
+        dict["dct_references_s"]["http://www.opengis.net/def/serviceType/ogc/wfs"] = geoserver_loc + "/wfs"
+    else:
+        dict["dct_references_s"]["http://www.opengis.net/def/serviceType/ogc/wcs"] = geoserver_loc + "/wcs"
     # Image viewer using Leaflet-IIIF "http://iiif.io/api/image":"",
     # Direct file download feature "http://schema.org/downloadUrl":"http://stacks.stanford.edu/file/druid:rf385pb1942/data.zip",
     # Data dictionary / documentation download "http://lccn.loc.gov/sh85035852":"",
@@ -383,17 +405,34 @@ def createDictionary(dict, file):
 
     return (dict)
 
-outdir = checkpath(vars(parser.parse_args())["outdir"]) if None else "./hashedDir"
-metadatadir = checkpath(vars(parser.parse_args())["mddir"]) if None else "./"
-datadir = checkpath(vars(parser.parse_args())["datadir"]) if None else "./"
-rights = vars(parser.parse_args())["rights"] if None else "Public"           # Public or Restricted
+args = parser.parse_args()
+print(args.outdir)
+outdir = checkpath(args.outdir) if args.outdir else "./hashedDir"
+metadatadir = checkpath(args.mddir) if args.mddir else "./"
+datadir = checkpath(args.datadir) if args.datadir else "./"
+rights = args.rights if args.rights else "Public"           # Public or Restricted
 if rights.lower() != "public" and rights.lower() != "restricted":
-    print("ERROR: Access rights value should be one of \"Public\" or \"Restricted\".")
+    print("ERROR: Access rights value should be one of \"Public\" or \"Restricted\". Exiting.")
     exit()
-institution = vars(parser.parse_args())["institution"] if None else "UArizona"    # Name of holding institution
-gbl_schema_version = vars(parser.parse_args())["version"] if None else "1.0"
-layerid_prefix = vars(parser.parse_args())["workspace"] if None else "UniversityLibrary"    # Corresponds to Geoserver Workspace
-isometadata_link = vars(parser.parse_args())["mdlink"] if None else r"https://raw.githubusercontent.com/OpenGeoMetadata/edu."   # Location of metadata files
+institution = args.institution if args.institution else "UArizona"    # Name of holding institution
+gbl_schema_version = args.version if args.version else "1.0"
+layerid_prefix = args.workspace if args.workspace else "UniversityLibrary"    # Corresponds to Geoserver Workspace
+isometadata_link = args.mdurl if args.mdurl else r"https://raw.githubusercontent.com/OpenGeoMetadata/edu." + institution.lower()   # Location of metadata files
+tosolr = args.tosolr if args.tosolr else "False"
+if tosolr != "True" and tosolr != "False":
+    print("ERROR: tosolr variable should be either \"True\" or \"False\". Exiting.")
+    exit()
+
+print("Beginning execution with variables:"
+      "\n  Metadata Directory:", metadatadir,
+      "\n  Output Directory:", outdir,
+      "\n  Data Directory:", datadir,
+      "\n  Access Rights:", rights,
+      "\n  Institution:", institution,
+      "\n  Schema Version:", gbl_schema_version,
+      "\n  LayerId Prefix:", layerid_prefix,
+      "\n  Metadata Url:", isometadata_link,
+      "\n  POST to Solr:", tosolr, "\n")
 
 isoTopicCategoriesMap = {"farming":"Farming",
                          "biota":"Biota",
@@ -479,10 +518,12 @@ for file in os.listdir(metadatadir):
 
         gblSchemaDict = createDictionary(gblschema,file)
         layerid = gblSchemaDict["layer_id_s"]
+        #print("outdir parent", outdir)
         outpath = setOutDir(layerid, outdir)
         foutdir = outdir + "/" + outpath
+        #print("outdir hash", foutdir)
 
-        xml_location = isometadata_link + institution.lower() + "/master/" + outpath + "/" + "iso19139.html"
+        xml_location = isometadata_link + "/master/" + outpath + "/" + "iso19139.html"
 
         # add xml location to dct_references_s value
         gblSchemaDict["dct_references_s"]["http://www.isotc211.org/schemas/2005/gmd/"] = xml_location
@@ -491,7 +532,7 @@ for file in os.listdir(metadatadir):
         gblSchemaDict["dct_references_s"] = refs
 
         # SET COLLECTIONS BASED ON FOLDER STRUCTURE OF ORIGINAL
-        collections = fpath.split(dir)[1].split("\\")[1:-1]
+        collections = fpath.split(outdir)[1].split("/")[1:-1]
         gblSchemaDict["dct_isPartOf_sm"] = collections
 
         jsonString = json.dumps(gblSchemaDict, indent=4, sort_keys=False)
@@ -501,7 +542,7 @@ for file in os.listdir(metadatadir):
         outfile_isoxml = foutdir + "/" + "iso19139.xml"
 
         # UPLOAD RECORD TO SOLR INDEX
-        if tosolr:
+        if tosolr.lower() == "true":
             solrDict = {"add": {"doc": gblSchemaDict}}
             solrString = json.dumps(solrDict, indent=4, sort_keys=False)
             headers = {"content-type": "application/json"}
@@ -516,7 +557,9 @@ for file in os.listdir(metadatadir):
         # add to layers_json dictionary
         layers_json[layerid] = outpath
 
-with open(outdir + "\\layers.json", 'w') as lfile:
+# WRITE the layers.json with a line noting the file name and the hash association
+ljsondile = outdir + "/layers.json"
+with open(ljsondile, 'w+') as lfile:
     jstring = json.dumps(layers_json, indent=4, sort_keys=False)
     lfile.write(jstring)
 
