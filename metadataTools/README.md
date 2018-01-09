@@ -7,18 +7,18 @@ Python script that takes a given structured csv file (metadata.csv) and converts
 
 This conversion was written for metadata that will be held in a data repository and follows criteria outlined in the by the OpenGeoportal Metadata Working Group General Best Practices document (draft).
 
-Mandatory Arguments
--------------------
-    -d  -datadir         Location of the data directory where actual datasets are held. This directory will be crawled and the names of all .shp (vector) and .tif (raster) files matched to the "Dataset Name" column in the csv file. This is mandatory as certain intrincic characteristic of the data (e.g. projection, extent, number of bands or number of features) are derived from the actual dataset itself.
 
 Optional Arguments
 ------------------
     -x  --xmltemplate    Location of the XML template file. Defaults to current directory.
     -c  --csvfile        Location of the csv file where metadata values are held. Defaults to current directory.
+    -d  -datadir         Location of the data directory where actual datasets are held. This directory will be crawled and the names of all .shp (vector) and .tif (raster) files matched to the "Dataset Name" column in the csv file. This is mandatory as certain intrincic characteristic of the data (e.g. projection, extent, number of bands or number of features) are derived from the actual dataset itself.
 
+	
 Example
 -------
 python CSVtoISO19139.py --xmltemplate="./xmltemplate.xml" --csvfile="./mymetadata.csv" --datadir="../mydata"
+
 
 Important items of Note
 -----------------------

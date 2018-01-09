@@ -32,6 +32,8 @@ def checkpath(path):
     if not os.path.exists(path):
         print("ERROR: Dataset or directory \"" + path + "\"cannot be found.")
         exit()
+    else:
+        return path
 
 # WRITE THE XML OBJECT TO FILE
 def writeToFile(xmlObj, f):
@@ -492,20 +494,19 @@ def validateRow(row, num):
             exit()
 
 
-isotemplate = checkpath(vars(parser.parse_args())["xmltemplate"]) if None else "./XML_Template.xml"
-csvfile = checkpath(vars(parser.parse_args())["csvfile"]) if None else "./metadata.csv"
-datasetdirectory = vars(parser.parse_args())["datadir"]
+args = parser.parse_args()
+isotemplate = checkpath(args.xmltemplate) if args.xmltemplate else "./XML_Template.xml"
+csvfile = checkpath(args.csvfile) if args.csvfile else "./metadata.csv"
+datasetdirectory = checkpath(args.datadir) if args.datadir else "./"
 
 # CRAWL DATA DIRECTORY AND CREATE DICTIONARY OF FILES AND FILE PATHS FOR SHP AND TIF FILES
-if datasetdirectory != None:
-    dsfiles = {}
-    checkpath(datasetdirectory)
-    # SEARCH DIRECTORY AND TRY TO MATCH DATA SET NAME IN CSV
-    for root, dirs, files in os.walk(datasetdirectory):
-        for dsf in files:
-            if dsf.endswith(".shp") or dsf.endswith(".tif"):
-                dsf_path = os.path.join(root, dsf)
-                dsfiles[dsf] = dsf_path
+dsfiles = {}
+# SEARCH DIRECTORY AND TRY TO MATCH DATA SET NAME IN CSV
+for root, dirs, files in os.walk(datasetdirectory):
+    for dsf in files:
+        if dsf.endswith(".shp") or dsf.endswith(".tif"):
+            dsf_path = os.path.join(root, dsf)
+            dsfiles[dsf] = dsf_path
 
 # Distributor Info
 dist_contact = {"Individual Name": "Geospatial Data Manager",
