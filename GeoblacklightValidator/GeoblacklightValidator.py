@@ -13,9 +13,8 @@ if not os.path.exists(reposdir):
     print("Invalid directory given. Exiting")
     exit()
 
-
 repos = {}
-givendir = os.path.dirname(reposdir)
+givendir = os.path.basename(reposdir)
 if givendir.startswith("edu."):
     repos[givendir] = reposdir
 else:
