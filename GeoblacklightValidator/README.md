@@ -20,11 +20,10 @@ python GeoblacklightValidator.py --directory="~/OpenGeoMetadata"
 Sample Output
 -------------
 
-
-| "File Path","Title","Parseable","Missing Keys","Invalid Keys","Failed URLs","Publisher Issue","Creator Issue","Access Issue","Date Issue"                                                                               | 
-|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------| 
-| "edu.stanford.purl\bb\033\gt\0615\geoblacklight.json","Important Farmland, San Luis Obispo County, California, 1996","True","['dct_isPartOf_sm']","['stanford_rights_metadata_s']","[]","Valid","Valid","Valid","Valid" | 
-| "edu.stanford.purl\bb\099\zb\1450\geoblacklight.json","Department Boundary: Haute-Garonne, France, 2010 ","True","['dct_isPartOf_sm']","['stanford_rights_metadata_s']","[]","Valid","Valid","Valid","Valid"            | 
+| File Path                                           | Title                                                        | Parseable | Missing Keys        | Invalid Keys                   | Failed URLs | Publisher Issue | Creator Issue | Access Issue | Date Issue |
+|-----------------------------------------------------|--------------------------------------------------------------|-----------|---------------------|--------------------------------|-------------|-----------------|---------------|--------------|------------|
+| edu.stanford.purl\bb\033\gt\0615\geoblacklight.json | Important Farmland, San Luis Obispo County, California, 1996 | True      | ['dct_isPartOf_sm'] | ['stanford_rights_metadata_s'] | []          | Valid           | Valid         | Valid        | Valid      |
+| edu.stanford.purl\bb\099\zb\1450\geoblacklight.json | Department Boundary: Haute-Garonne, France, 2010             | True      | ['dct_isPartOf_sm'] | ['stanford_rights_metadata_s'] | []          | Valid           | Valid         | Valid        | Valid      |
 
 
 References
