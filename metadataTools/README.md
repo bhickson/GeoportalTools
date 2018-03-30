@@ -12,12 +12,13 @@ Optional Arguments
 ------------------
     -x  --xmltemplate    Location of the XML template file. Defaults to current directory.
     -c  --csvfile        Location of the csv file where metadata values are held. Defaults to current directory.
-    -d  --datadir         Location of the data directory where actual datasets are held. This directory will be crawled and the names of all .shp (vector) and .tif (raster) files matched to the "Dataset Name" column in the csv file. This is mandatory as certain intrincic characteristic of the data (e.g. projection, extent, number of bands or number of features) are derived from the actual dataset itself.
+    -d  --datadir        Location of the data directory where actual datasets are held. This directory will be crawled and the names of all .shp (vector) and .tif (raster) files matched to the "Dataset Name" column in the csv file. This is mandatory as certain intrincic characteristic of the data (e.g. projection, extent, number of bands or number of features) are derived from the actual dataset itself.
+	-r  --rename         True/False value indicating if the input datset (shp or tif should be copied and renamed to a folder RenamedDatasets in the parent dir of --csvfile argument. Default is False
 
 	
 Example
 -------
-python CSVtoISO19139.py --xmltemplate="./xmltemplate.xml" --csvfile="./mymetadata.csv" --datadir="../mydata"
+python CSVtoISO19139.py --xmltemplate="./xmltemplate.xml" --csvfile="./mymetadata.csv" --datadir="../mydata" --rename=True
 
 
 Important items of Note

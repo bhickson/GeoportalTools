@@ -19,7 +19,7 @@ from xml.dom import minidom as md
 
 print("Starting")
 # Apache Solr Collection URL. E.g. http://localhost:8080/solr/collection1
-solr_loc = ""
+solr_loc = "http://geodev2.library.arizona.edu:8086/solr/UALib_test"
 solrURL = solr_loc + "/update?commit=true"
 # GeoServer Location
 geoserver_loc = "https://geo.library.arizona.edu/geoserver"
@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(description="Takes a given directory containing
                                              " schema.")
 parser.add_argument("-o", "--outdir", type=str, help="Output parent directory where processed files and folders will be"
                                                      " created. Defaults to the current directory.")
-parser.add_argument("-m", "--mddir", type=str, help="Location of the CSV file containing metadata information. Defaults"
+parser.add_argument("-m", "--mddir", type=str, help="Location of the XML metadata files. Defaults"
                                                     " to the current directory.")
 parser.add_argument("-d", "--datadir", type=str, help="Directory location where geospatial datasets reside. If not"
                                                       " specified, the script directory is used.")
@@ -379,8 +379,11 @@ def createDictionary(dict, file):
         "http://www.opengis.net/def/serviceType/ogc/wms"] = geoserver_loc + "/wms"
     if getDataType(file)[1] == "Dataset":
         dict["dct_references_s"]["http://www.opengis.net/def/serviceType/ogc/wfs"] = geoserver_loc + "/wfs"
-    else:
+    elif getDataType(file)[1] == "Image":
         dict["dct_references_s"]["http://www.opengis.net/def/serviceType/ogc/wcs"] = geoserver_loc + "/wcs"
+    else:
+        print("ERROR: Unknown Data Type. Exiting")
+        exit()
     # Image viewer using Leaflet-IIIF "http://iiif.io/api/image":"",
     # Direct file download feature "http://schema.org/downloadUrl":"http://stacks.stanford.edu/file/druid:rf385pb1942/data.zip",
     # Data dictionary / documentation download "http://lccn.loc.gov/sh85035852":"",
@@ -406,7 +409,6 @@ def createDictionary(dict, file):
     return (dict)
 
 args = parser.parse_args()
-print(args.outdir)
 outdir = checkpath(args.outdir) if args.outdir else "./hashedDir"
 metadatadir = checkpath(args.mddir) if args.mddir else "./"
 datadir = checkpath(args.datadir) if args.datadir else "./"
@@ -532,7 +534,8 @@ for file in os.listdir(metadatadir):
         gblSchemaDict["dct_references_s"] = refs
 
         # SET COLLECTIONS BASED ON FOLDER STRUCTURE OF ORIGINAL
-        collections = fpath.split(outdir)[1].split("/")[1:-1]
+        print(fpath.split(outdir))
+        collections = fpath.split(outdir)[0].split("/")[1:-1]
         gblSchemaDict["dct_isPartOf_sm"] = collections
 
         jsonString = json.dumps(gblSchemaDict, indent=4, sort_keys=False)

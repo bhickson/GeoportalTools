@@ -11,7 +11,7 @@
 #   The new file name (filename) created is derived from the value of the "Title" filed in the csv
 #   PURL values are assigned based on the file name (filename) and PURL prefix (purl_prefix) values
 
-import csv, os, argparse
+import csv, os, argparse, shutil
 from osgeo import osr, ogr, gdal
 from datetime import datetime
 from lxml import etree as ET
@@ -28,6 +28,10 @@ parser.add_argument("-c", "--csvfile", type=str, help="LOCATION OF THE CSV FILE 
 parser.add_argument("-d", "--datadir", type=str, help="DIRECTORY LOCATION WHERE GEOSPATIAL DATASETS IDENTIFIED IN THE"
                                                       " CSV FILE RESIDE. IF NOT SPECFIIED, PARENT DIRECTORY OF CSV FILE"
                                                       " IS USED.")
+parser.add_argument("-r", "--rename",  type=bool, default=False, help="True/False value indicating if the input datset"
+                                                                      "(shp or tif) should be copied and renamed to a"
+                                                                      " folder RenamedDatasets in the parent dir of"
+                                                                      " --csvfile argument. Default is False")
 def checkpath(path):
     if not os.path.exists(path):
         print("ERROR: Dataset or directory \"" + path + "\"cannot be found.")
@@ -43,13 +47,31 @@ def writeToFile(xmlObj, f):
     tRoot = xmlfromstring.find(".")
 
     newTree = ET.ElementTree(xmlfromstring)
-    outdir = parentdir
+    outdir = csvdir
     if not os.path.exists(outdir):
         os.mkdir(outdir)
     outfile = outdir + "\\" + f + ".xml"
     if os.path.exists(outfile):
         os.remove(outfile)
     newTree.write(outfile, encoding="UTF-8")
+
+def copyrenameDataset(infile, outfile):
+    basename = os.path.splitext(os.path.basename(infile))[0]
+    outdir = csvdir + "/RenamedDatasets"
+    if not os.path.exists(outdir):
+        os.mkdir(outdir)
+
+    datadir = os.path.abspath(os.path.join(os.path.abspath(infile), os.pardir))
+    # Single shapefile are split into multiple (shp, sbx, dbf, etc.), need to iterate parent directory and copy
+    # all asoociated files.
+    for root, dirs, files in os.walk(datadir):
+        for file in files:
+            if file.startswith(basename):
+                print(file)
+                ext = os.path.splitext(file)[1]  # file extension
+                fpath = os.path.join(root,file)
+                outfile = filename + ext
+                shutil.copy(fpath, outdir + "/" + outfile)
 
 # REMOVE LEADING AND TRAILING WHITESPACES
 def rltw(text):
@@ -185,7 +207,7 @@ def getLayerInfo(ds):
             layer_info["Type"] = "point"
         elif geometry == "LINESTRING":
             layer_info["Type"] = "composite"
-        elif geometry == "POLYGON":
+        elif geometry == "POLYGON" or geometry == "MULTIPOLYGON":
             layer_info["Type"] = "complex"
         else:
             print("ERROR: UNKNOWN DATA TYPE " + geometry + ". Should be one of POINT, LINESTRING, or POLYGON")
@@ -340,14 +362,17 @@ def createElements(element_path):
             for type, list in keywordArray.items():
                 descriptive_keywords_elem = ET.SubElement(element, "{" + namespaces["gmd"] + "}descriptiveKeywords")
                 md_keywords_elem = ET.SubElement(descriptive_keywords_elem, "{" + namespaces["gmd"] + "}MD_Keywords")
+                print(type, list)
                 for value in list:
                     keyword_elem = ET.SubElement(md_keywords_elem, "{" + namespaces["gmd"] + "}keyword")
                     createCharacterElem(keyword_elem, rltw(value))
                 type_elem = ET.SubElement(md_keywords_elem, "{" + namespaces["gmd"] + "}type")
+
                 if "theme" in type:
                     keywordType = "theme"
                 elif "place" in type:
                     keywordType = "place"
+
                 setGMXCodeElemAttributes(type_elem, keywordType, "MD_KeywordTypeCode")
 
                 thesaurusname_elem = ET.SubElement(md_keywords_elem, "{" + namespaces["gmd"] + "}thesaurusName")
@@ -489,15 +514,18 @@ def validateRow(row, num):
     if all(v == "" for v in row.values()):  # is it a fully empty row?
         exit()
     for k,v in row.items():
-        if k != "Metadata Fields" and k != "Feature and Attribute Definitions" and len(v)== 0:
-            print("ERROR: Empty values in row " + str(num) + ". Exiting")
+        if k != "Metadata Fields" and k != "Feature and Attribute Definitions" and k != "Theme Keywords (Free Text)"\
+                and len(v)== 0:
+            print("ERROR: Empty values in row " + str(num) + " for column '" + k + "'. Exiting")
             exit()
 
 
 args = parser.parse_args()
-isotemplate = checkpath(args.xmltemplate) if args.xmltemplate else "./XML_Template.xml"
+isotemplate = checkpath(args.xmltemplate) if args.xmltemplate else os.path.dirname(__file__) + "./XML_Template.xml"
 csvfile = checkpath(args.csvfile) if args.csvfile else "./metadata.csv"
-datasetdirectory = checkpath(args.datadir) if args.datadir else "./"
+# GET PARENT DIRECTORY OF THE CSV FILE
+csvdir = os.path.abspath(os.path.join(os.path.abspath(csvfile), os.pardir))
+datasetdirectory = checkpath(args.datadir) if args.datadir else csvdir
 
 # CRAWL DATA DIRECTORY AND CREATE DICTIONARY OF FILES AND FILE PATHS FOR SHP AND TIF FILES
 dsfiles = {}
@@ -526,9 +554,6 @@ purl_prefix = r"http://dx.doi.org/10.2458/azu_geo_"
 # METADATA SCHEMA INFORMATION
 mdstandardname = "ISO 19139 Geographic Information - Metadata - Implementation Specification"
 mdstandardversion = "2007"
-
-# GET PARENT DIRECTORY OF THE CSV FILE
-parentdir = os.path.abspath(os.path.join(csvfile, os.pardir))
 
 # SET THE XML NAMESPACES AND REGISTER THEM
 gmd = "http://www.isotc211.org/2005/gmd"
@@ -614,14 +639,19 @@ with open(csvfile) as f:
     for row in reader:
         rowcount +=1
         if row['Metadata Fields'] != 'Metadata Fields' and row['Metadata Fields'] != 'Values' and row['Metadata Fields'] != 'Example':
+            print(row["Metadata Fields"])
             validateRow(row, rowcount)
             datasetname = row["Dataset Name"]
             # LOCATE THE ACTUAL DATASET PATH BASED ON FILE NAME. IF A DIRECTORY IS SPECIFIED, MATCH TO A FILE IN THAT
             #   DIRECTORY. IF NOT, USE PARENT DIRECTORY OF CSV FILE
             if datasetdirectory != None:
-                ds_path = dsfiles[datasetname]
+                try:
+                    ds_path = dsfiles[datasetname]
+                except KeyError:
+                    print("ERROR: Unable to find ", datasetname, "in input data directory", datasetdirectory, ". Exiting")
+                    exit()
             else:
-                ds_path = parentdir + "\\" + datasetname
+                ds_path = csvdir + "\\" + datasetname
                 if not os.path.exists(ds_path):
                     print("ERROR: Dataset cannot be found. Not in the same directory at CSV.")
                     exit()
@@ -667,7 +697,8 @@ with open(csvfile) as f:
                 return newlist
 
             themeKeywords_LCSH = row['Theme Keywords (LCSH)'].split(",")
-            themeKey_Free = row["Theme Keyword (Free Text)"].split(",")
+            themeKey_Free = row["Theme Keywords (Free Text)"].split(",")
+            themeKey_Free = [] if len(themeKey_Free) == 1 and len(themeKey_Free[0]) == 0 else themeKey_Free
             placeKeywords_GEOnet = row['Place Keywords (GEOnet)'].split(",")
             placeKeywords_LCSH = row['Place Keywords (LCSH)'].split(",")
             keywordArray = {"themeLCSH": themeKeywords_LCSH, "themeFree": themeKey_Free, "placeGEOnet":placeKeywords_GEOnet, "placeLCSH": placeKeywords_LCSH}
@@ -675,8 +706,8 @@ with open(csvfile) as f:
             themeKey_ISOTopics = row['Topic Categories (ISO 19115)'].replace(" ","").split(",")
             for themeCode in themeKey_ISOTopics:
                 if themeCode not in isoTopicCategories:
-                    print(
-                        "ERROR: Theme Keyword \'" + themeCode + "\' is invalid. Must be one of " + r"https://www2.usgs.gov/science/about/thesaurus-full.php?thcode=15")
+                    print("ERROR: Theme Keyword '" + themeCode + "' is invalid. Must be one of " +
+                          r"https://www2.usgs.gov/science/about/thesaurus-full.php?thcode=15")
                     exit()
             # ATTRIBUTES WILL BE A LIST OF ATTRIBUTES ASSIGNED WITH = AND SEPARATED BY COMMAS
             #  e.g. zip5=US Zipcode, muKey=Geologic Key Code
@@ -747,6 +778,10 @@ with open(csvfile) as f:
             createElements(dataquality_iso)
             createElements(uri_iso)
 
+            if args.rename:
+                copyrenameDataset(ds_path, filename)
+
             # WRITE NEW XML TREE TO FILE
+            print("FILENAME: ",filename)
             writeToFile(iso_tree, filename)
             print("Finished with ", filename)
