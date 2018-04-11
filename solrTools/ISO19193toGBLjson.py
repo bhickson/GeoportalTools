@@ -12,7 +12,7 @@
 #  WHERE THE XML FILE IS HELD. E.G. IF THE XML FILE IS IN "./imagery/aerial photographs/USDA/NAIP/" THE COLLECTION LIST
 #  IN THE JSON WILL BE [imagery, aerial photographs, USDA, NAIP]
 
-import json, os, ogr, re, shutil, requests, argparse
+import json, os, ogr, re, shutil, requests, argparse, struct, base64
 from lxml import etree as ET
 from collections import OrderedDict
 from xml.dom import minidom as md
@@ -163,10 +163,33 @@ def mapIsoSubjects(list):
     return (list)
 
 
+def fnv64(data):
+    """FROM https://gist.github.com/Cilyan/9424144"""
+    hash_ = 0xcbf29ce484222325
+    for b in data:
+        hash_ *= 0x100000001b3
+        hash_ &= 0xffffffffffffffff
+        hash_ ^= b
+    return hash_
+
+def hash_layerName(name):
+    """FROM https://gist.github.com/Cilyan/9424144"""
+    # Turn dn into bytes with a salt, dn is expected to be ascii data
+    data = name.encode("ascii")
+    # Hash data
+    hash_ = fnv64(data)
+    # Pack hash (int) into bytes
+    bhash = struct.pack("<Q", hash_)
+    # Encode in base64. There is always a padding "=" at the end, because the
+    # hash is always 64bits long. We don't need it.
+    print(base64.urlsafe_b64encode(bhash)[1:-1].decode("ascii"))
+    return base64.urlsafe_b64encode(bhash)[:-1].decode("ascii")
+
+
 def setOutDir(lyr_id, odir):
     """per OpenGeoMetadata standards, metadata files should be organized by either the geoblacklight
     layer_id_s name given in the layer_id_s value of geoblacklight. E.g. if the layer_id_s value is
-    'UniversityLibrary:Arizona_AmerIndianReservations_1900', the fvn-1a (32 bit) hash would be
+    'UniversityLibrary:Arizona_AmerIndianReservations_1900', the fvn-1a (64 bit) hash would be
     calculated from 'Arizona_AmerIndianReservations_1900'.  The fvn-1a hash algorythm outputs a 10
     digit number, so the directory structure will be split into 3,3,2,2. E.g. if the hash is
     3285418445, the directory structure will be 328/541/84/45
@@ -178,7 +201,7 @@ def setOutDir(lyr_id, odir):
         # print(dir)
         os.mkdir(odir)
 
-    # fvn-1a (32 bit) hash calculated pull from https://gist.github.com/vaiorabbit/5670985
+    """# fvn-1a (32 bit) hash calculated pull from https://gist.github.com/vaiorabbit/5670985
     hval = 0x811c9dc5
     fnv_32_prime = 0x01000193
     uint32_max = 2 ** 32
@@ -186,7 +209,8 @@ def setOutDir(lyr_id, odir):
         hval = hval ^ ord(s)
         hval = (hval * fnv_32_prime) % uint32_max
 
-    hash = str(hval)
+    hash = str(hval)"""
+    hash = hash_layerName(layerid)
 
     dirlist = [hash[0:3], hash[3:6], hash[6:8], hash[8:10]]
     dirstring = hash[0:3] + "/" + hash[3:6] + "/" + hash[6:8] + "/" + hash[8:10]
