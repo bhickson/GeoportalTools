@@ -12,7 +12,7 @@ The output json file and a copy of the original XML (renamed to iso19139.xml) ar
 Optional Arguments
 ------------------
     -o  --outdir         Output parent directory where processed files and folders will be created. Defaults to current directory
-    -m  --mddir          Location of the CSV file containting metadata information. Defaults to current directory.
+    -m  --mddir          Directory location containing the iso19139 xml files. Defaults to current directory.
     -d  --datadir        Directory location where geospatial datasets reside. These datasets are used to determine the actual bounding box, dataset type, and other instrinsic info. Defaults to the current directory
     -r  --rights         Access rights - should be "Public" or "Restricted". Default is "Public".
     -i  --institution    Institution holding the dataset in their repository. Default is "UArizona".
