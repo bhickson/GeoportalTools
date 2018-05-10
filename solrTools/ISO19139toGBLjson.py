@@ -530,7 +530,7 @@ for dir_root, dirs, files in os.walk(metadatadir):
             foutdir = outdir + "/" + outpath
             #print("outdir hash", foutdir)
 
-            xml_location = isometadata_link + "/master/" + outpath + "/" + "iso19139.html"
+            xml_location = isometadata_link + "/master/" + outpath.replace("\\","/") + "/" + "iso19139.xml"
 
             # add xml location to dct_references_s value
             gblSchemaDict["dct_references_s"]["http://www.isotc211.org/schemas/2005/gmd/"] = xml_location
