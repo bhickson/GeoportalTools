@@ -6,7 +6,7 @@ Description
 -----------
 Python script that takes a given directory containing XML files following the ISO 19139 schema and converts them to JSON files formatted to the GeoBlacklight schema. If the tosolr argument is given (True/False) the JSON string is posted to the solr_loc specified in the script.
 
-The output json file and a copy of the original XML (renamed to iso19139.xml) are written to a directory path derived from the fvn-1a hash (32 bit) of the dataset title. The fvn-1a hash algorythm outputs a 10 digit number, so the directory structure will be split into 3,3,2,2. E.g. if the hash is Ego4L8KVU4, the directory structure will be Ego/4L8/KV/U4
+The output json file and a copy of the original XML (renamed to iso19139.xml) are written to a directory path derived from the fvn-1a hash (64 bit) of the dataset title. The fvn-1a hash algorythm outputs a 10 digit number, so the directory structure will be split into 3,3,2,2. E.g. if the hash is Ego4L8KVU4, the directory structure will be Ego/4L8/KV/U4
 
 
 Optional Arguments

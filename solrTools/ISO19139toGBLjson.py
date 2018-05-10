@@ -16,10 +16,11 @@ import json, os, ogr, re, shutil, requests, argparse, struct, base64
 from lxml import etree as ET
 from collections import OrderedDict
 from xml.dom import minidom as md
+from fnv64basedhash import hash_dn
 
-print("Starting")
+print("Starting translation of xml files in folder")
 # Apache Solr Collection URL. E.g. http://localhost:8080/solr/collection1
-solr_loc = "http://geodev2.library.arizona.edu:8086/solr/UALib_test"
+solr_loc = "http://geotest.library.arizona.edu:8983/solr/UAL_GeospatialRecords"
 solrURL = solr_loc + "/update?commit=true"
 # GeoServer Location
 geoserver_loc = "https://geo.library.arizona.edu/geoserver"
@@ -49,6 +50,7 @@ parser.add_argument("-t", "--tosolr", type=str, help="True/False value indicatin
 
 
 def checkpath(path):
+    path = os.path.abspath(path)
     if not os.path.exists(path):
         print("ERROR: Dataset or directory \"" + path + "\"cannot be found.")
         exit()
@@ -62,7 +64,7 @@ def findFile(xmlFile):
         fpath = filelist[dataName]
         return fpath
     except:
-        print("ERROR: Unable to find the geospatial dataset", dataName, "in the data directory (datadir). Exiting.")
+        print("ERROR: Unable to find the geospatial dataset %s in the data directory %s. Exiting." % (dataName, datadir))
         exit()
 
 
@@ -163,29 +165,6 @@ def mapIsoSubjects(list):
     return (list)
 
 
-def fnv64(data):
-    """FROM https://gist.github.com/Cilyan/9424144"""
-    hash_ = 0xcbf29ce484222325
-    for b in data:
-        hash_ *= 0x100000001b3
-        hash_ &= 0xffffffffffffffff
-        hash_ ^= b
-    return hash_
-
-def hash_layerName(name):
-    """FROM https://gist.github.com/Cilyan/9424144"""
-    # Turn dn into bytes with a salt, dn is expected to be ascii data
-    data = name.encode("ascii")
-    # Hash data
-    hash_ = fnv64(data)
-    # Pack hash (int) into bytes
-    bhash = struct.pack("<Q", hash_)
-    # Encode in base64. There is always a padding "=" at the end, because the
-    # hash is always 64bits long. We don't need it.
-    print(base64.urlsafe_b64encode(bhash)[1:-1].decode("ascii"))
-    return base64.urlsafe_b64encode(bhash)[:-1].decode("ascii")
-
-
 def setOutDir(lyr_id, odir):
     """per OpenGeoMetadata standards, metadata files should be organized by either the geoblacklight
     layer_id_s name given in the layer_id_s value of geoblacklight. E.g. if the layer_id_s value is
@@ -196,27 +175,26 @@ def setOutDir(lyr_id, odir):
 
     https: // github.com / OpenGeoMetadata / metadatarepository / issues / 3
     """
+    sep = os.sep
 
     if not os.path.exists(odir):
         # print(dir)
         os.mkdir(odir)
 
-    """# fvn-1a (32 bit) hash calculated pull from https://gist.github.com/vaiorabbit/5670985
-    hval = 0x811c9dc5
-    fnv_32_prime = 0x01000193
-    uint32_max = 2 ** 32
-    for s in layerid:
-        hval = hval ^ ord(s)
-        hval = (hval * fnv_32_prime) % uint32_max
-
-    hash = str(hval)"""
-    hash = hash_layerName(layerid)
+    llegal_folder_names = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+                           "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"]
+    salt = ""
+    hash = hash_dn(layerid, salt).replace("_", "").replace("-", "")
+    for iffn in llegal_folder_names:
+        while iffn.lower() in hash.lower():
+            salt += " "
+            hash = hash_dn(layerid, salt).replace("_", "").replace("-", "")
 
     dirlist = [hash[0:3], hash[3:6], hash[6:8], hash[8:10]]
-    dirstring = hash[0:3] + "/" + hash[3:6] + "/" + hash[6:8] + "/" + hash[8:10]
+    dirstring = hash[0:3] + sep + hash[3:6] + sep + hash[6:8] + sep + hash[8:10]
 
     for dir in dirlist:
-        odir += "/" + dir
+        odir = os.path.join(odir,dir)
         if not os.path.exists(odir):
             # print(dir)
             os.mkdir(odir)
@@ -457,7 +435,7 @@ print("Beginning execution with variables:"
       "\n  Institution:", institution,
       "\n  Schema Version:", gbl_schema_version,
       "\n  LayerId Prefix:", layerid_prefix,
-      "\n  Metadata Url:", isometadata_link,
+      "\n  Metadata Url Prefix:", isometadata_link,
       "\n  POST to Solr:", tosolr, "\n")
 
 isoTopicCategoriesMap = {"farming":"Farming",
@@ -499,90 +477,92 @@ ET.register_namespace("gts", gts)
 
 # BUILD LIST OF DATA FILES TO MATCH FROM
 filelist = {}
-for root, dirs, files in os.walk(datadir):
+for dir_root, dirs, files in os.walk(datadir):
     dirs[:] = [d for d in dirs if d not in ["ARIA"]]
     for file in files:
         if file.endswith(".shp") or file.endswith(".tif"):
-            fpath = os.path.join(root, file)
+            fpath = os.path.join(dir_root, file)
             filelist[file] = fpath
 
+print("\n...Finished building file list from data directory...")
 # INDEX OF GEOBLACKLIGHT layer_id_s AND CALCULATED HASH. USED TO ALLOW REFERENCE OF ORIGINAL DATASET NAME TO
 #  OPENGEOMETADATA DIRECTORY STRUCTURE.
 layers_json = {}
 
-for file in os.listdir(metadatadir):
-    if file.endswith(".xml"):
-        fpath = os.path.join(metadatadir, file)
-        print("Starting", file)
-        tree = ET.parse(fpath)
-        root = tree.getroot()
-        gblschema = OrderedDict({
-                            "layer_slug_s": "",
-                            "dc_identifier_s": "",
-                            "dc_title_s": "",
-                            "dc_description_s": "",
-                            "dc_rights_s": "",
-                            "dct_provenance_s": "",
-                            "dct_references_s": OrderedDict(),
-                            "layer_id_s": "",
-                            "dct_isPartOf_sm": [],
-                            "layer_geom_type_s": "",
-                            "layer_modified_dt": "",
-                            "dc_format_s": "",
-                            "dc_language_s": "",
-                            "dc_type_s": "",
-                            "dc_publisher_s": "",
-                            "dc_creator_sm": "",
-                            "dc_subject_sm": [],
-                            "dct_issued_s": "",
-                            "dct_temporal_sm": [],
-                            "dct_spatial_sm": [],
-                            "solr_geom": "",
-                            "solr_year_i": "",
-                            "geoblacklight_version": ""
-                    })
+print("\n...Beginning crawl of metadata directory...")
+for dir_root, dirs, files in os.walk(metadatadir):
+    for file in files:
+        if file.endswith(".xml"):
+            print("Starting", file)
+            fpath = os.path.join(dir_root, file)
+            tree = ET.parse(fpath)
+            root = tree.getroot()
+            gblschema = OrderedDict({
+                                "layer_slug_s": "",
+                                "dc_identifier_s": "",
+                                "dc_title_s": "",
+                                "dc_description_s": "",
+                                "dc_rights_s": "",
+                                "dct_provenance_s": "",
+                                "dct_references_s": OrderedDict(),
+                                "layer_id_s": "",
+                                "dct_isPartOf_sm": [],
+                                "layer_geom_type_s": "",
+                                "layer_modified_dt": "",
+                                "dc_format_s": "",
+                                "dc_language_s": "",
+                                "dc_type_s": "",
+                                "dc_publisher_s": "",
+                                "dc_creator_sm": "",
+                                "dc_subject_sm": [],
+                                "dct_issued_s": "",
+                                "dct_temporal_sm": [],
+                                "dct_spatial_sm": [],
+                                "solr_geom": "",
+                                "solr_year_i": "",
+                                "geoblacklight_version": ""
+                        })
 
-        gblSchemaDict = createDictionary(gblschema,file)
-        layerid = gblSchemaDict["layer_id_s"]
-        #print("outdir parent", outdir)
-        outpath = setOutDir(layerid, outdir)
-        foutdir = outdir + "/" + outpath
-        #print("outdir hash", foutdir)
+            gblSchemaDict = createDictionary(gblschema,file)
+            layerid = gblSchemaDict["layer_id_s"]
+            #print("outdir parent", outdir)
+            outpath = setOutDir(layerid, outdir)
+            foutdir = outdir + "/" + outpath
+            #print("outdir hash", foutdir)
 
-        xml_location = isometadata_link + "/master/" + outpath + "/" + "iso19139.html"
+            xml_location = isometadata_link + "/master/" + outpath + "/" + "iso19139.html"
 
-        # add xml location to dct_references_s value
-        gblSchemaDict["dct_references_s"]["http://www.isotc211.org/schemas/2005/gmd/"] = xml_location
-        # dct_references_s needs to be a string value
-        refs = json.dumps(gblSchemaDict["dct_references_s"])
-        gblSchemaDict["dct_references_s"] = refs
+            # add xml location to dct_references_s value
+            gblSchemaDict["dct_references_s"]["http://www.isotc211.org/schemas/2005/gmd/"] = xml_location
+            # dct_references_s needs to be a string value
+            refs = json.dumps(gblSchemaDict["dct_references_s"])
+            gblSchemaDict["dct_references_s"] = refs
 
-        # SET COLLECTIONS BASED ON FOLDER STRUCTURE OF ORIGINAL
-        print(fpath.split(outdir))
-        collections = fpath.split(outdir)[0].split("/")[1:-1]
-        gblSchemaDict["dct_isPartOf_sm"] = collections
+            # SET COLLECTIONS BASED ON FOLDER STRUCTURE OF ORIGINAL
+            collections = os.path.relpath(fpath, metadatadir).split(os.sep)[:-1]
+            gblSchemaDict["dct_isPartOf_sm"] = collections
 
-        jsonString = json.dumps(gblSchemaDict, indent=4, sort_keys=False)
+            jsonString = json.dumps(gblSchemaDict, indent=4, sort_keys=False)
 
-        # SET OUTPUT FILE VALUES
-        outfile_json = foutdir + "/" + "geoblacklight.json"
-        outfile_isoxml = foutdir + "/" + "iso19139.xml"
+            # SET OUTPUT FILE VALUES
+            outfile_json = foutdir + "/" + "geoblacklight.json"
+            outfile_isoxml = foutdir + "/" + "iso19139.xml"
 
-        # UPLOAD RECORD TO SOLR INDEX
-        if tosolr.lower() == "true":
-            solrDict = {"add": {"doc": gblSchemaDict}}
-            solrString = json.dumps(solrDict, indent=4, sort_keys=False)
-            headers = {"content-type": "application/json"}
-            r = requests.post(solrURL, data=solrString, headers= headers)
+            # UPLOAD RECORD TO SOLR INDEX
+            if tosolr.lower() == "true":
+                solrDict = {"add": {"doc": gblSchemaDict}}
+                solrString = json.dumps(solrDict, indent=4, sort_keys=False)
+                headers = {"content-type": "application/json"}
+                r = requests.post(solrURL, data=solrString, headers= headers)
 
-        # write geoblacking schema values to json file
-        with open(outfile_json, 'w') as jfile:
-            jfile.write(jsonString)
+            # write geoblacking schema values to json file
+            with open(outfile_json, 'w') as jfile:
+                jfile.write(jsonString)
 
-        shutil.copy(fpath, outfile_isoxml)
+            shutil.copy(fpath, outfile_isoxml)
 
-        # add to layers_json dictionary
-        layers_json[layerid] = outpath
+            # add to layers_json dictionary
+            layers_json[layerid] = outpath
 
 # WRITE the layers.json with a line noting the file name and the hash association
 ljsondile = outdir + "/layers.json"
