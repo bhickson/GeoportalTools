@@ -16,41 +16,113 @@ from osgeo import osr, ogr, gdal
 from datetime import datetime
 from lxml import etree as ET
 from xml.dom import minidom as md
+import geopandas as gpd
 
-parser = argparse.ArgumentParser(description="Convert rows of geospatial metadata values held in a csv file to xml"
-                                             " following the ISO 19139 schema.")
-parser.add_argument("-x", "--xmltemplate", type=str, help="LOCATION OF THE ISO 19139 XML TEMPLATE FILE. IF NOT"
-                                                          " SPECIFIED, THE FILE IS ASSUMED TO BE IN THE SAME DIRECTORY"
-                                                          " AS THE SCRIPT.")
-parser.add_argument("-c", "--csvfile", type=str, help="LOCATION OF THE CSV FILE CONTAINING METADATA INFORMATION. IF NOT"
-                                                      " SPECFIIED, THE FILE IS ASSUMED TO BE IN THE SAME DIRECTORY AS"
-                                                      " THE SCRIPT.")
-parser.add_argument("-d", "--datadir", type=str, help="DIRECTORY LOCATION WHERE GEOSPATIAL DATASETS IDENTIFIED IN THE"
-                                                      " CSV FILE RESIDE. IF NOT SPECFIIED, PARENT DIRECTORY OF CSV FILE"
-                                                      " IS USED.")
-parser.add_argument("-r", "--rename",  type=bool, default=False, help="True/False value indicating if the input datset"
-                                                                      "(shp or tif) should be copied and renamed to a"
-                                                                      " folder RenamedDatasets in the parent dir of"
-                                                                      " --csvfile argument. Default is False")
-def checkpath(path):
-    if not os.path.exists(path):
-        print("ERROR: Dataset or directory \"" + path + "\"cannot be found.")
-        exit()
-    else:
-        return path
+
+# Distributor Info
+dist_contact = {"Individual Name": "Geospatial Data Manager",
+                "Organization Name": "The University of Arizona Libraries",
+                "Street Address": "1510 E University Blvd",
+                "City": "Tucson",
+                "Admin Area": "Arizona",
+                "Postal Code": "85716",
+                "Country": "US",
+                "EMail Address": "LBRY-uageoportal@email.arizona.edu"}
+
+metadata_contact = dist_contact
+
+# PURL prefix
+purl_prefix = r"http://dx.doi.org/10.2458/azu_geo_"
+
+# METADATA SCHEMA INFORMATION
+mdstandardname = "ISO 19139 Geographic Information - Metadata - Implementation Specification"
+mdstandardversion = "2007"
+
+# SET THE XML NAMESPACES AND REGISTER THEM
+gmd = "http://www.isotc211.org/2005/gmd"
+gml = "http://www.opengis.net/gml"
+gco = "http://www.isotc211.org/2005/gco"
+gts = "http://www.isotc211.org/2005/gts"
+
+namespaces = {'gmd': gmd,
+              'gml': gml,
+              'gco': gco,
+              'gts': gts}
+
+ET.register_namespace("gmd", gmd)
+ET.register_namespace("gml", gml)
+ET.register_namespace("gco", gco)
+ET.register_namespace("gts", gts)
+
+# PRETTY FORMAT THE XML FILE
+pretty_print = lambda f: '\n'.join([line for line in md.parseString(f).toprettyxml().split('\n') if line.strip()])
+
+# ISO 19115 TOPIC CATEGORIES
+isoTopicCategories = ["farming", "biota", "boundaries", "climatologyMeteorologyAtmosphere",
+                      "economy", "elevation", "environment", "geoscientificInformation",
+                      "health", "imageryBaseMapsEarthCover", "intelligenceMilitary",
+                      "inlandWaters", "location", "oceans", "planningCadastre", "society",
+                      "structure", "transportation", "utilitiesCommunication"]
+# XML ELEMENT PATHS
+mdlanguage_iso = ["gmd:language"]
+
+mdhierarchylevel_iso = ["gmd:hierarchyLevel"]
+
+mdcontact_iso = ["gmd:contact"]
+
+cicitation_iso = ["gmd:identificationInfo",
+                  "gmd:MD_DataIdentification",
+                  "gmd:citation",
+                  "gmd:CI_Citation"]
+
+constraints_iso = ["gmd:identificationInfo",
+                   "gmd:MD_DataIdentification",
+                   "gmd:resourceConstraints",
+                   "gmd:MD_LegalConstraints",
+                   "gmd:otherConstraints"]
+
+identificationinfo_iso = ["gmd:identificationInfo",
+                          "gmd:MD_DataIdentification"]
+
+uri_iso = ["gmd:dataSetURI"]
+
+
+mddatestamp_iso = ["gmd:dateStamp",
+                   "gco:Date"]
+
+refsys_iso = ["gmd:referenceSystemInfo",
+              "gmd:MD_ReferenceSystem",
+              "gmd:referenceSystemIdentifier",
+              "gmd:RS_Identifier"]
+
+vectorspatialrepinfo_iso = ["gmd:spatialRepresentationInfo",
+                            "gmd:MD_VectorSpatialRepresentation",
+                            "gmd:geometricObjects",
+                            "gmd:MD_GeometricObjects"]
+
+rasterspatialrepinfo_iso = ["gmd:spatialRepresentationInfo",
+                            "gmd:MD_Georectified"]
+
+distributorinfo_iso = ["gmd:distributionInfo",
+                       "gmd:MD_Distribution",
+                       "gmd:distributor",
+                       "gmd:MD_Distributor"]
+
+dataquality_iso = ["gmd:dataQualityInfo",
+                   "gmd:DQ_DataQuality",
+                   "gmd:lineage",
+                   "gmd:LI_Lineage"]
+
 
 # WRITE THE XML OBJECT TO FILE
-def writeToFile(xmlObj, f):
+def writeToFile(xmlObj, outfile):
     roughstring = ET.tostring(xmlObj)
     xmlfromstring = ET.fromstring(pretty_print(roughstring))
 
     tRoot = xmlfromstring.find(".")
 
     newTree = ET.ElementTree(xmlfromstring)
-    outdir = csvdir
-    if not os.path.exists(outdir):
-        os.mkdir(outdir)
-    outfile = outdir + "\\" + f + ".xml"
+
     if os.path.exists(outfile):
         os.remove(outfile)
     newTree.write(outfile, encoding="UTF-8")
@@ -61,17 +133,19 @@ def copyrenameDataset(infile, outfile):
     if not os.path.exists(outdir):
         os.mkdir(outdir)
 
-    datadir = os.path.abspath(os.path.join(os.path.abspath(infile), os.pardir))
+    #datadir = os.path.abspath(os.path.join(os.path.abspath(infile), os.pardir))
     # Single shapefile are split into multiple (shp, sbx, dbf, etc.), need to iterate parent directory and copy
     # all asoociated files.
-    for root, dirs, files in os.walk(datadir):
-        for file in files:
-            if file.startswith(basename):
-                print(file)
-                ext = os.path.splitext(file)[1]  # file extension
-                fpath = os.path.join(root,file)
-                outfile = filename + ext
-                shutil.copy(fpath, outdir + "/" + outfile)
+    #for root, dirs, files in os.walk(datadir):
+    #    for file in files:
+    #        if file.startswith(basename):
+    #            print(file)
+    outpath = os.path.join(outdir, outfile)
+    
+    print(f"Renaming dataset to file {outpath}")
+    shutil.copy(infile, outpath)
+    
+    return outpath
 
 # REMOVE LEADING AND TRAILING WHITESPACES
 def rltw(text):
@@ -114,6 +188,14 @@ def formatDate(text):
 
 # VIA USER CAPOOTI STACKEXCHANGE: HTTPS://GIS.STACKEXCHANGE.COM/A/7615
 def getEPSGCode(file_path):
+    df = gpd.read_file(file_path)
+    # GET EPSG CODE
+    try:
+        epsg_code = int(df.crs.get('init').split(":")[1])
+        return epsg_code
+    except:
+        print("Unable to get get epsg code of geodataframe: Found CRS : {}\nExiting.".format(df.crs))
+        raise ValueError
     prj = file_path[:-3] + "prj"
     prj_file = open(prj, 'r')
     prj_txt = prj_file.read()
@@ -176,10 +258,27 @@ def getRasterExtent(rasterDS):
 
 # GET EXTENT (BOUNDING BOX) OF VECTOR DATASET
 def getVectorExtent(vectorDS):
-    driver = ogr.GetDriverByName("ESRI Shapefile")
-    dsOpen = driver.Open(vectorDS, 0)
-    extentTuple = dsOpen.GetLayer().GetExtent()  # returns (-180.0, 180.0, -78.7329013, 83.6664731)
-    extent = {"xmin": extentTuple[0], "xmax": extentTuple[1], "ymin": extentTuple[2], "ymax": extentTuple[3]}
+    if vectorDS.endswith(".shp"):
+        driver_name = "ESRI Shapefile"
+    elif vectorDS.endswith(".gpkg"):
+        driver_name = "GPKG"
+    else:
+        print("Unknown vector dataset for file {}. Must be 'shp' or 'gpkg'.")
+        raise ValueError
+        
+    df = gpd.read_file(vectorDS)
+    try:
+        df.to_crs(epsg=4326, inplace=True)
+    except:
+        proj4 = input("Unable to identify native crs. Please paste in proj4 string (lookup at spatialreference.org): ")
+        df.crs = proj4
+        df.to_crs(epsg=4326, inplace=True)
+        
+    extent = df.total_bounds # returns array with values xmin, ymin, xmax, ymax
+    #driver = ogr.GetDriverByName(driver_name)
+    #dsOpen = driver.Open(vectorDS, 0)
+    #extentTuple = dsOpen.GetLayer().GetExtent()  # returns (-180.0, 180.0, -78.7329013, 83.6664731)
+    extent = {"xmin": extent[0], "xmax": extent[2], "ymin": extent[1], "ymax": extent[3]}
     return extent
 
 # GET TYPE OF DATASET LAYER AND IF VECTOR, NUMBER OF FEATURES
@@ -309,7 +408,9 @@ def createElements(element_path):
                                                     "{" + namespaces["gmd"] + "}CI_ResponsibleParty")
                 org_name_elem = ET.SubElement(cirespon_party_elem, "{" + namespaces["gmd"] + "}organisationName")
                 createCharacterElem(org_name_elem, val)
-                setGMXCodeElemAttributes(cirespon_party_elem, type, "CI_RoleCode")
+                role_elem = ET.SubElement(cirespon_party_elem,
+                                                    "{" + namespaces["gmd"] + "}role")
+                setGMXCodeElemAttributes(role_elem, type, "CI_RoleCode")
 
             # CREATE TITLE ELEMENT
             title_elem = ET.SubElement(element, "{" + namespaces["gmd"] + "}title")
@@ -520,268 +621,235 @@ def validateRow(row, num):
             exit()
 
 
-args = parser.parse_args()
-isotemplate = checkpath(args.xmltemplate) if args.xmltemplate else os.path.dirname(__file__) + "./XML_Template.xml"
-csvfile = checkpath(args.csvfile) if args.csvfile else "./metadata.csv"
-# GET PARENT DIRECTORY OF THE CSV FILE
-csvdir = os.path.abspath(os.path.join(os.path.abspath(csvfile), os.pardir))
-datasetdirectory = checkpath(args.datadir) if args.datadir else csvdir
-
-# CRAWL DATA DIRECTORY AND CREATE DICTIONARY OF FILES AND FILE PATHS FOR SHP AND TIF FILES
-dsfiles = {}
-# SEARCH DIRECTORY AND TRY TO MATCH DATA SET NAME IN CSV
-for root, dirs, files in os.walk(datasetdirectory):
-    for dsf in files:
-        if dsf.endswith(".shp") or dsf.endswith(".tif"):
-            dsf_path = os.path.join(root, dsf)
-            dsfiles[dsf] = dsf_path
-
-# Distributor Info
-dist_contact = {"Individual Name": "Geospatial Data Manager",
-                "Organization Name": "The University of Arizona Libraries",
-                "Street Address": "1510 E University Blvd",
-                "City": "Tucson",
-                "Admin Area": "Arizona",
-                "Postal Code": "85716",
-                "Country": "US",
-                "EMail Address": "LBRY-uageoportal@email.arizona.edu"}
-
-metadata_contact = dist_contact
-
-# PURL prefix
-purl_prefix = r"http://dx.doi.org/10.2458/azu_geo_"
-
-# METADATA SCHEMA INFORMATION
-mdstandardname = "ISO 19139 Geographic Information - Metadata - Implementation Specification"
-mdstandardversion = "2007"
-
-# SET THE XML NAMESPACES AND REGISTER THEM
-gmd = "http://www.isotc211.org/2005/gmd"
-gml = "http://www.opengis.net/gml"
-gco = "http://www.isotc211.org/2005/gco"
-gts = "http://www.isotc211.org/2005/gts"
-
-namespaces = {'gmd': gmd,
-              'gml': gml,
-              'gco': gco,
-              'gts': gts}
-
-ET.register_namespace("gmd", gmd)
-ET.register_namespace("gml", gml)
-ET.register_namespace("gco", gco)
-ET.register_namespace("gts", gts)
-
-# PRETTY FORMAT THE XML FILE
-pretty_print = lambda f: '\n'.join([line for line in md.parseString(f).toprettyxml().split('\n') if line.strip()])
-
-# ISO 19115 TOPIC CATEGORIES
-isoTopicCategories = ["farming", "biota", "boundaries", "climatologyMeteorologyAtmosphere",
-                      "economy", "elevation", "environment", "geoscientificInformation",
-                      "health", "imageryBaseMapsEarthCover", "intelligenceMilitary",
-                      "inlandWaters", "location", "oceans", "planningCadastre", "society",
-                      "structure", "transportation", "utilitiesCommunication"]
-# XML ELEMENT PATHS
-mdlanguage_iso = ["gmd:language"]
-
-mdhierarchylevel_iso = ["gmd:hierarchyLevel"]
-
-mdcontact_iso = ["gmd:contact"]
-
-cicitation_iso = ["gmd:identificationInfo",
-                  "gmd:MD_DataIdentification",
-                  "gmd:citation",
-                  "gmd:CI_Citation"]
-
-constraints_iso = ["gmd:identificationInfo",
-                   "gmd:MD_DataIdentification",
-                   "gmd:resourceConstraints",
-                   "gmd:MD_LegalConstraints",
-                   "gmd:otherConstraints"]
-
-identificationinfo_iso = ["gmd:identificationInfo",
-                          "gmd:MD_DataIdentification"]
-
-uri_iso = ["gmd:dataSetURI"]
+def checkpath(path):
+    if not os.path.exists(path):
+        print("ERROR: Dataset or directory \"" + path + "\"cannot be found.")
+        exit()
+    else:
+        return path
 
 
-mddatestamp_iso = ["gmd:dateStamp",
-                   "gco:Date"]
+def csvtoISO(csvfile, data_loc=None, isotemplate=None, rename=True):
+    # GET PARENT DIRECTORY OF THE CSV FILE
+    global csvdir
+    csvdir = os.path.abspath(os.path.join(os.path.abspath(csvfile), os.pardir))
 
-refsys_iso = ["gmd:referenceSystemInfo",
-              "gmd:MD_ReferenceSystem",
-              "gmd:referenceSystemIdentifier",
-              "gmd:RS_Identifier"]
+    if isotemplate is None:
+        isotemplate = os.path.join(os.path.dirname(__file__), "XML_Template.xml")
+        print(f"No template file passed. Using template {isotemplate}")
 
-vectorspatialrepinfo_iso = ["gmd:spatialRepresentationInfo",
-                            "gmd:MD_VectorSpatialRepresentation",
-                            "gmd:geometricObjects",
-                            "gmd:MD_GeometricObjects"]
+    dsfiles = {}
+    if data_loc != None:
+        for root, dirs, files in os.walk(data_loc):
+            for dsf in files:
+                if dsf.endswith(".shp") or dsf.endswith(".tif"):
+                    dsf_path = os.path.join(root, dsf)
+                    dsfiles[dsf] = dsf_path
 
-rasterspatialrepinfo_iso = ["gmd:spatialRepresentationInfo",
-                            "gmd:MD_Georectified"]
-
-
-distributorinfo_iso = ["gmd:distributionInfo",
-                       "gmd:MD_Distribution",
-                       "gmd:distributor",
-                       "gmd:MD_Distributor"]
-
-dataquality_iso = ["gmd:dataQualityInfo",
-                   "gmd:DQ_DataQuality",
-                   "gmd:lineage",
-                   "gmd:LI_Lineage"]
-
-# OPEN CSV FOR READING
-with open(csvfile) as f:
-    reader = csv.DictReader(f)
-    rowcount = 0
-    # ITERATE ROWS. ALL ROWS THAT AREN'T FIELD IDENTIFIERS, VALUE SPECIFIERS, OR EXAMPLES ARE SKIPPED
-    for row in reader:
-        rowcount +=1
-        if row['Metadata Fields'] != 'Metadata Fields' and row['Metadata Fields'] != 'Values' and row['Metadata Fields'] != 'Example':
-            print(row["Metadata Fields"])
-            validateRow(row, rowcount)
-            datasetname = row["Dataset Name"]
-            # LOCATE THE ACTUAL DATASET PATH BASED ON FILE NAME. IF A DIRECTORY IS SPECIFIED, MATCH TO A FILE IN THAT
-            #   DIRECTORY. IF NOT, USE PARENT DIRECTORY OF CSV FILE
-            if datasetdirectory != None:
-                try:
-                    ds_path = dsfiles[datasetname]
-                except KeyError:
-                    print("ERROR: Unable to find ", datasetname, "in input data directory", datasetdirectory, ". Exiting")
+    # OPEN CSV FOR READING
+    with open(csvfile) as f:
+        reader = csv.DictReader(f)
+        rowcount = 0
+        # ITERATE ROWS. ALL ROWS THAT AREN'T FIELD IDENTIFIERS, VALUE SPECIFIERS, OR EXAMPLES ARE SKIPPED
+        for row in reader:
+            rowcount += 1
+            if row['Metadata Fields'] != 'Metadata Fields' and row['Metadata Fields'] != 'Values' and row[
+                'Metadata Fields'] != 'Example':
+                print(row["Metadata Fields"])
+                
+                # Initialize xml element value variables
+                global datasetname, filename, iso_tree, iso_troot, dataset_type, title, language, abstract, originators, collection, publisher, publicationDate, dateOfContent, accessConstraint, isoconst_text, keywordArray, themeKey_ISOTopics, attributeDefinitions, referenceSystemCode, referenceSystemCodeSpace, referenceSystemVersion, currentTime, presentation_form_code, metadata_progress, maintenance_requency_code, language, purl, scope_code, distformat, ds_extent, layerinfo, objecttype, numobjects, spatial_representation_type_code, spatialrepinfo_iso, dimensions
+                
+                validateRow(row, rowcount)
+                datasetname = row["Dataset Name"]
+                # LOCATE THE ACTUAL DATASET PATH BASED ON FILE NAME. IF A DIRECTORY IS SPECIFIED, MATCH TO A FILE IN THAT
+                #   DIRECTORY. IF NOT, USE PARENT DIRECTORY OF CSV FILE
+                if data_loc != None:
+                    try:
+                        # if data_loc is a file, use that as the path. If not, lookup path in dsfiles dictionary
+                        if os.path.isfile(data_loc):
+                            dspath = data_loc
+                        else:
+                            ds_path = dsfiles[datasetname]
+                    except KeyError:
+                        print("ERROR: Unable to find ", datasetname, "in input data directory", data_loc,
+                              ". Exiting")
+                        exit()
+                else:
+                    ds_path = os.path.join(csvdir, datasetname)
+                    if not os.path.exists(ds_path):
+                        print("ERROR: Dataset cannot be found. Not in the same directory at CSV.")
+                        exit()
+             
+                if datasetname.endswith(".shp") or datasetname.endswith(".gpkg"):
+                    dataset_type = "vector"
+                elif datasetname.endswith(".tif"):
+                    dataset_type = "raster"
+                else:
+                    print("ERROR: Unknown Dataset Type for " + datasetname + ". Should be shp, gpkg, or tif). Exiting.")
                     exit()
-            else:
-                ds_path = csvdir + "\\" + datasetname
-                if not os.path.exists(ds_path):
-                    print("ERROR: Dataset cannot be found. Not in the same directory at CSV.")
-                    exit()
+                if datasetname.endswith(".shp"):
+                    distformat = "Shapefile"
+                elif datasetname.endswith(".gpkg"):
+                    distformat = "GeoPackage"
 
-            if datasetname.endswith(".shp"):
-                dataset_type = "vector"
-            elif datasetname.endswith(".tif"):
-                dataset_type = "raster"
-            else:
-                print("ERROR: Unknown Dataset Type for" + datasetname + ". Should be shp or tif). Exiting.")
-                exit()
+                title = row['Title']  # DONE Field Value
 
-            title = row['Title']  # DONE Field Value
+                #  IF DATE IS A SPAN, SHOULD BE INDICATED WITH 'TO' (E.G. 2013 TO 2015)
+                title_parse = title.split(",")
+                # THE NEW FILE NAME THAT WILL BE CREATED WILL BE BASED ON THE TITLE VALUE AND
+                #   FOLLOWS PLACE_THEME_DATE FORMAT.
+                #   E.G. FOR THE TITLE "Rivers, Arizona, 1993", THE FILE NAME WOULD BE Arizona_Rivers_1993
+                filename = title_parse[1] + "_" + title_parse[0] + "_" + title_parse[2]
+                for character in filename:
+                    if character.lower() not in "abcdefghijklmnopqrstuvwxyz0123456789_":
+                        filename = filename.replace(character, "")
 
-            #  IF DATE IS A SPAN, SHOULD BE INDICATED WITH 'TO' (E.G. 2013 TO 2015)
-            title_parse = title.split(",")
-            # THE NEW FILE NAME THAT WILL BE CREATED WILL BE BASED ON THE TITLE VALUE AND
-            #   FOLLOWS PLACE_THEME_DATE FORMAT.
-            #   E.G. FOR THE TITLE "Rivers, Arizona, 1993", THE FILE NAME WOULD BE Arizona_Rivers_1993
-            filename = title_parse[1] + "_" + title_parse[0] + "_" + title_parse[2]
-            for character in filename:
-                if character.lower() not in "abcdefghijklmnopqrstuvwxyz0123456789_":
-                    filename = filename.replace(character, "")
+                abstract = row['Abstract']
+                # IF MULTIPLE ORIGINATORS, THEY'LL BE SEPARATED BY COMMAS
+                originators = row['Originator(s)'].split(",")
+                collection = row['Collection/Series Identification']
+                if collection != "":
+                    collection.split(",")
+                publisher = row['Publisher']
+                publicationDate = formatDate(row['Publication Date'])["instant_date"]
+                dateOfContent = formatDate(row['Date of Content'])
+                accessConstraint = row['Access Constraints']
+                useConstraint = row['Use Constraints']
+                isoconst_text = accessConstraint + "    |    " + useConstraint
 
-            abstract = row['Abstract']
-            # IF MULTIPLE ORIGINATORS, THEY'LL BE SEPARATED BY COMMAS
-            originators = row['Originator(s)'].split(",")
-            collection = row['Collection/Series Identification']
-            if collection != "":
-                collection.split(",")
-            publisher = row['Publisher']
-            publicationDate = formatDate(row['Publication Date'])["instant_date"]
-            dateOfContent = formatDate(row['Date of Content'])
-            accessConstraint = row['Access Constraints']
-            useConstraint = row['Use Constraints']
-            isoconst_text = accessConstraint + "    |    " + useConstraint
+                def processKeywordList(keylist):
+                    newlist = []
+                    for item in keylist:
+                        item = rltw(item)
+                        newlist.append(item)
+                    return newlist
 
-            def processKeywordList(keylist):
-                newlist =[]
-                for item in keylist:
-                    item = rltw(item)
-                    newlist.append(item)
-                return newlist
+                themeKeywords_LCSH = row['Theme Keywords (LCSH)'].split(",")
+                themeKey_Free = row["Theme Keywords (Free Text)"].split(",")
+                themeKey_Free = [] if len(themeKey_Free) == 1 and len(themeKey_Free[0]) == 0 else themeKey_Free
+                placeKeywords_GEOnet = row['Place Keywords (GEOnet)'].split(",")
+                placeKeywords_LCSH = row['Place Keywords (LCSH)'].split(",")
+                keywordArray = {"themeLCSH": themeKeywords_LCSH, "themeFree": themeKey_Free,
+                                "placeGEOnet": placeKeywords_GEOnet, "placeLCSH": placeKeywords_LCSH}
 
-            themeKeywords_LCSH = row['Theme Keywords (LCSH)'].split(",")
-            themeKey_Free = row["Theme Keywords (Free Text)"].split(",")
-            themeKey_Free = [] if len(themeKey_Free) == 1 and len(themeKey_Free[0]) == 0 else themeKey_Free
-            placeKeywords_GEOnet = row['Place Keywords (GEOnet)'].split(",")
-            placeKeywords_LCSH = row['Place Keywords (LCSH)'].split(",")
-            keywordArray = {"themeLCSH": themeKeywords_LCSH, "themeFree": themeKey_Free, "placeGEOnet":placeKeywords_GEOnet, "placeLCSH": placeKeywords_LCSH}
+                themeKey_ISOTopics = row['Topic Categories (ISO 19115)'].replace(" ", "").split(",")
+                for themeCode in themeKey_ISOTopics:
+                    if themeCode not in isoTopicCategories:
+                        print("ERROR: Theme Keyword '" + themeCode + "' is invalid. Must be one of " +
+                              r"https://www2.usgs.gov/science/about/thesaurus-full.php?thcode=15")
+                        exit()
+                # ATTRIBUTES WILL BE A LIST OF ATTRIBUTES ASSIGNED WITH = AND SEPARATED BY COMMAS
+                #  e.g. zip5=US Zipcode, muKey=Geologic Key Code
+                # NOT CURRENTLY SUPPORTED FOR ISO
+                attributeDefinitions = row['Feature and Attribute Definitions'].split(",") if len(
+                    row['Feature and Attribute Definitions']) > 0 else []
 
-            themeKey_ISOTopics = row['Topic Categories (ISO 19115)'].replace(" ","").split(",")
-            for themeCode in themeKey_ISOTopics:
-                if themeCode not in isoTopicCategories:
-                    print("ERROR: Theme Keyword '" + themeCode + "' is invalid. Must be one of " +
-                          r"https://www2.usgs.gov/science/about/thesaurus-full.php?thcode=15")
-                    exit()
-            # ATTRIBUTES WILL BE A LIST OF ATTRIBUTES ASSIGNED WITH = AND SEPARATED BY COMMAS
-            #  e.g. zip5=US Zipcode, muKey=Geologic Key Code
-            # NOT CURRENTLY SUPPORTED FOR ISO
-            attributeDefinitions = row['Feature and Attribute Definitions'].split(",") if len(row['Feature and Attribute Definitions']) > 0 else []
-
-            for featureDef in attributeDefinitions:
+                for featureDef in attributeDefinitions:
                     attribute = rltw(featureDef.split("=")[0])
                     attributeDef = rltw(featureDef.split("=")[1])
 
-            if dataset_type == "vector":
-                ds_extent = getVectorExtent(ds_path)
-                layerinfo = getLayerInfo(ds_path)
-                objecttype = layerinfo["Type"]
-                numobjects = layerinfo["Number of Features"]
-                spatial_representation_type_code = "vector"
-                spatialrepinfo_iso = vectorspatialrepinfo_iso
-                distformat = "Shapefile"
-            elif dataset_type == "raster":
-                ds_extent = getRasterExtent(ds_path)
-                # NOTE: ONLY SUPPORTING MAX OF 4 DIMENSIONS HERE (X,Y,Z,TIME) WITH SINGLE DIMENSION SIZE FOR EACH.
-                #   MORE COMPLEX DIMENSION TYPES HERE: http://www.isotc211.org/2005/resources/Codelist/gmxCodelists.xml
-                num_dimensions = ""
-                dimension_size = 1
-                dimensions = {}
-                for dimension in range(1, num_dimensions + 1):
-                    if dimension == 1:
-                        dimensions[dimension] = "row"
-                    elif dimension == 2:
-                        dimensions[dimension] = "column"
-                    elif dimension == 3:
-                        dimensions[dimension] = "vertical"
-                    elif dimension == 4:
-                        dimensions[dimension] = "time"
-                spatial_representation_type_code = "grid"
-                spatialrepinfo_iso = rasterspatialrepinfo_iso
-                distformat = "GEOTiff"
+                if dataset_type == "vector":
+                    ds_extent = getVectorExtent(data_loc)
+                    layerinfo = getLayerInfo(data_loc)
+                    objecttype = layerinfo["Type"]
+                    numobjects = layerinfo["Number of Features"]
+                    spatial_representation_type_code = "vector"
+                    spatialrepinfo_iso = vectorspatialrepinfo_iso
+                elif dataset_type == "raster":
+                    ds_extent = getRasterExtent(data_loc)
+                    # NOTE: ONLY SUPPORTING MAX OF 4 DIMENSIONS HERE (X,Y,Z,TIME) WITH SINGLE DIMENSION SIZE FOR EACH.
+                    #   MORE COMPLEX DIMENSION TYPES HERE: http://www.isotc211.org/2005/resources/Codelist/gmxCodelists.xml
+                    num_dimensions = ""
+                    dimensions = {}
+                    for dimension in range(1, num_dimensions + 1):
+                        if dimension == 1:
+                            dimensions[dimension] = "row"
+                        elif dimension == 2:
+                            dimensions[dimension] = "column"
+                        elif dimension == 3:
+                            dimensions[dimension] = "vertical"
+                        elif dimension == 4:
+                            dimensions[dimension] = "time"
+                    spatial_representation_type_code = "grid"
+                    spatialrepinfo_iso = rasterspatialrepinfo_iso
+                    distformat = "GEOTiff"
 
-            referenceSystemCode = getEPSGCode(ds_path)
-            referenceSystemCodeSpace = "EPSG"
-            referenceSystemVersion = "9.2"
+                referenceSystemCode = str(getEPSGCode(data_loc))
+                referenceSystemCodeSpace = "EPSG"
+                referenceSystemVersion = "9.2"
 
-            currentTime = datetime.now()
+                currentTime = datetime.now()
 
-            presentation_form_code = "mapDigital"
-            metadata_progress = "completed"
-            maintenance_requency_code = "notPlanned"
+                presentation_form_code = "mapDigital"
+                metadata_progress = "completed"
+                maintenance_requency_code = "notPlanned"
 
-            language = "eng"
+                language = "eng"
 
-            purl = purl_prefix + filename.lower()
+                purl = purl_prefix + filename.lower()
 
-            scope_code = "dataset"
+                scope_code = "dataset"
 
-            iso_tree = ET.parse(isotemplate)
-            iso_troot = iso_tree.getroot()
+                iso_tree = ET.parse(isotemplate)
+                iso_troot = iso_tree.getroot()
 
-            createElements(mdlanguage_iso)
-            createElements(mdhierarchylevel_iso)
-            createElements(mdcontact_iso)
-            createElements(mddatestamp_iso)
-            createElements(cicitation_iso)
-            createElements(constraints_iso)
-            createElements(identificationinfo_iso)
-            createElements(spatialrepinfo_iso)
-            createElements(refsys_iso)
-            createElements(distributorinfo_iso)
-            createElements(dataquality_iso)
-            createElements(uri_iso)
+                createElements(mdlanguage_iso)
+                createElements(mdhierarchylevel_iso)
+                createElements(mdcontact_iso)
+                createElements(mddatestamp_iso)
+                createElements(cicitation_iso)
+                createElements(constraints_iso)
+                createElements(identificationinfo_iso)
+                createElements(spatialrepinfo_iso)
+                createElements(refsys_iso)
+                createElements(distributorinfo_iso)
+                createElements(dataquality_iso)
+                createElements(uri_iso)
 
-            if args.rename:
-                copyrenameDataset(ds_path, filename)
+                
+                newfile = filename + "." + data_loc.split(".")[-1] # add extension onto new name
+                if not rename:
+                    outfile = newfile
+                else:
+                    new_file_loc = copyrenameDataset(data_loc, newfile)
 
-            # WRITE NEW XML TREE TO FILE
-            print("FILENAME: ",filename)
-            writeToFile(iso_tree, filename)
-            print("Finished with ", filename)
+                # WRITE NEW XML TREE TO FILE
+                print("FILENAME: ", filename)
+                out_xmlfile = new_file_loc + ".xml"
+                writeToFile(iso_tree, out_xmlfile)
+                print("Finished with ", filename)
+
+                return {"dataset": new_file_loc, "metadata": out_xmlfile}
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description="Convert rows of geospatial metadata values held in a csv file to xml"
+                                                 " following the ISO 19139 schema.")
+    parser.add_argument("-x", "--xmltemplate", type=str, help="LOCATION OF THE ISO 19139 XML TEMPLATE FILE. IF NOT"
+                                                              " SPECIFIED, THE FILE IS ASSUMED TO BE IN THE SAME DIRECTORY"
+                                                              " AS THE SCRIPT.")
+    parser.add_argument("-c", "--csvfile", type=str,
+                        help="LOCATION OF THE CSV FILE CONTAINING METADATA INFORMATION. IF NOT"
+                             " SPECFIIED, THE FILE IS ASSUMED TO BE IN THE SAME DIRECTORY AS"
+                             " THE SCRIPT.")
+    parser.add_argument("-d", "--datadir", type=str,
+                        help="DIRECTORY LOCATION WHERE GEOSPATIAL DATASETS IDENTIFIED IN THE"
+                             " CSV FILE RESIDE. IF NOT SPECFIIED, PARENT DIRECTORY OF CSV FILE"
+                             " IS USED.")
+    parser.add_argument("-r", "--rename", type=bool, default=True,
+                        help="True/False value indicating if the input datset"
+                             "(shp or tif) should be copied and renamed to a"
+                             " folder RenamedDatasets in the parent dir of"
+                             " --csvfile argument. Default is False")
+
+
+
+    args = parser.parse_args()
+    isotemplate = checkpath(args.xmltemplate) if args.xmltemplate else None
+    csvfile = checkpath(args.csvfile) if args.csvfile else "./metadata.csv"
+
+    datasetdirectory = checkpath(args.datadir) if args.datadir else None
+
+    csvtoISO(csvfile, datasetdirectory, isotemplate=isotemplate, rename=args.rename)
